@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
@@ -126,12 +127,38 @@ func (c *collector) getMetricMetadata(metric pmetric.Metric, attributes pcommon.
 		values = append(values, instance)
 	}
 
+	uniqueKeys := keys[:0]
+	uniqueValues := values[:0]
+
+	indexByKey := make(map[string]int, len(keys))
+	duplicateIndexValues := make(map[int][]string)
+	for i, k := range keys {
+		if index, ok := indexByKey[k]; ok {
+			if vs, ok := duplicateIndexValues[index]; ok {
+				duplicateIndexValues[index] = append(vs, values[i])
+			} else {
+				duplicateIndexValues[index] = []string{values[i]}
+			}
+			continue
+		}
+
+		indexByKey[k] = i
+		uniqueKeys = append(uniqueKeys, k)
+		uniqueValues = append(uniqueValues, values[i])
+	}
+
+	for i, vs := range duplicateIndexValues {
+		values := append(vs, uniqueValues[i])
+		sort.Sort(sort.StringSlice(values))
+		uniqueValues[i] = strings.Join(values, ";")
+	}
+
 	return prometheus.NewDesc(
 		prometheustranslator.BuildPromCompliantName(metric, c.namespace),
 		metric.Description(),
-		keys,
+		uniqueKeys,
 		c.constLabels,
-	), values
+	), uniqueValues
 }
 
 func (c *collector) convertGauge(metric pmetric.Metric, resourceAttrs pcommon.Map) (prometheus.Metric, error) {
